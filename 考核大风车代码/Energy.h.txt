@@ -1,0 +1,36 @@
+#pragma once
+#pragma once
+#include<iostream>
+#include<opencv2/opencv.hpp>
+
+using namespace std;
+using namespace cv;
+
+class ArmorDescribtor {
+
+public:
+
+	//图像处理
+	void preprocessing(Mat img, bool is_blue);
+
+	//求装甲板轮廓
+	void findcontours();
+
+	//求识别装甲板矩形和中心点
+	void findapproach();
+
+	//第四个装甲板出现时，识别出第五个装甲板
+	void findfifthcontours();
+
+public:
+	Mat img;//处理后图像
+	vector<vector<Point>>allcontours;//所有轮廓
+	vector<Point>contours;//最小轮廓
+	double standard;//面积标准
+	vector<Point2f>approach_contours;//拟合矩形轮廓
+	Point approach_center;//拟合矩形中心
+	Point find_center;//第五个装甲板中心
+	vector<Point2f>find_contours;//第五个装甲板矩形
+};
+
+

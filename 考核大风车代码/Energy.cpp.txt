@@ -1,0 +1,169 @@
+#include"Energy.h"
+
+//图像处理
+void ArmorDescribtor::preprocessing(Mat img,bool is_blue)
+{
+	GaussianBlur(img, img, Size(3, 3), 30, 30);//模糊
+	Mat color[3];
+	split(img, color);//分离通道
+	Mat split;
+	if (is_blue)
+	{
+		split = color[0] - color[2];//蓝色：b-r
+	}
+	else
+	{
+		split = color[2] - color[0];//红色：r-b
+	}
+
+	threshold(split, split, 0, 255, THRESH_BINARY + THRESH_OTSU);//二值化-自适应阈值
+
+	Mat mask = Mat::zeros(img.rows + 2, img.cols + 2, CV_8UC1);//漫水法
+	floodFill(split, mask, Point(1, 1), 255);
+
+	threshold(split, split, 100, 255, THRESH_BINARY_INV);//黑白翻转
+
+	//计算开运算size标准:最大轮廓周长/ 220 * 8
+	double standard_length_d=3;
+	vector<vector<Point>>contours_length;
+	findContours(split, contours_length, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+	for (int i = 0; i < contours_length.size(); i++)
+	{
+		double length = arcLength(contours_length[i], true);
+		if (standard_length_d< length)
+		{
+			standard_length_d = length;
+		}
+	}
+	int standard_length_i = (int)(standard_length_d / 220 * 8);
+
+	if (standard_length_i>3)
+	{
+		//开运算
+		Mat kernel = getStructuringElement(0, Size(standard_length_i, standard_length_i));
+		morphologyEx(split, split, MORPH_CLOSE, kernel);
+	}
+
+	//赋值图片
+	split.copyTo(this->img);
+}
+
+//求装甲板轮廓
+void ArmorDescribtor::findcontours()
+{
+	//un未筛选轮廓
+	vector<vector<Point>> un_contours;
+	findContours(img, un_contours, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+
+	//第一次筛选：大于最大轮廓面积的1/5
+	//求筛选标准
+
+	double maxarea = contourArea(un_contours[0]);
+	int num;
+	for (int i = 0; i< un_contours.size(); i++)
+	{
+		double un_area = contourArea(un_contours[i]);
+		if (un_area > maxarea)
+		{
+			maxarea = un_area;
+			num = i;
+		}
+	}
+	standard = maxarea / 5;
+
+	//筛选出所有装甲板轮廓
+	for (int j = 0; j < un_contours.size(); j++)
+	{
+		if (contourArea(un_contours[j]) > standard)
+		{
+			allcontours.push_back(un_contours[j]);
+		}
+
+	}
+
+	//第二次筛选：最小轮廓
+	contours = allcontours[0];
+	for (int k = 0; k < allcontours.size(); k++)
+	{
+		if (contourArea(allcontours[k]) < contourArea(contours))
+		{
+			contours = allcontours[k];
+		}
+	}
+}
+
+//求识别装甲板矩形和中心点
+void ArmorDescribtor::findapproach()
+{
+	RotatedRect rect = minAreaRect(contours);
+	rect.points(approach_contours);
+	approach_center = rect.center;
+}
+
+//第四个装甲板出现时，识别出第五个装甲板
+void ArmorDescribtor::findfifthcontours()
+{
+	//将所有的轮廓转换为点集
+	vector<Point>re_allcontours;
+	
+	for (int i = 0; i < allcontours.size(); i++)
+	{
+		for (int j = 0; j < allcontours[i].size(); j++)
+		{
+			re_allcontours.push_back(allcontours[i][j]);
+		}
+	}
+
+	//点集拟合成圆，找到装甲板旋转中心
+	Point2f rotatedcenter;//中心点
+	float rotatedr;
+	minEnclosingCircle(re_allcontours, rotatedcenter, rotatedr);
+
+	find_center = approach_center;//初始化第五装甲板中心坐标
+
+	double angle = 72 * CV_PI / 180;//旋转角度：72度
+
+	for (int i = 0; i < 4; i++)
+	{
+		//第五装甲板中心坐标旋转
+		float rotatedx_c = find_center.x - rotatedcenter.x;
+		float rotatedy_c = find_center.y - rotatedcenter.y;
+		find_center.x = (rotatedx_c)*cos(angle) - (rotatedy_c)*sin(angle) + rotatedcenter.x;
+		find_center.y = (rotatedx_c)*sin(angle) + (rotatedy_c)*cos(angle) + rotatedcenter.y;
+
+		//判断旋转结束标志
+		double judge;
+		bool endjudge = false;
+
+		//第五装甲板矩形坐标旋转
+		for (int j = 0; j < approach_contours.size(); j++)
+		{
+			if (i == 0)//初始化第五装甲板矩形坐标
+			{
+				find_contours.push_back(approach_contours[j]);
+			}
+
+			float rotatedx = find_contours[j].x - rotatedcenter.x;
+			float rotatedy = find_contours[j].y - rotatedcenter.y;
+			find_contours[j].x = (rotatedx)*cos(angle) - (rotatedy)*sin(angle) + rotatedcenter.x;
+			find_contours[j].y = (rotatedx)*sin(angle) + (rotatedy)*cos(angle) + rotatedcenter.y;
+			
+		}
+		//判断旋转后中心点是否在轮廓内
+		for (int k = 0; k < allcontours.size(); k++)
+		{
+			judge = pointPolygonTest(allcontours[k], find_center, false);
+			if (judge >= 0 && !endjudge)
+			{
+				endjudge = true;
+			}
+		}
+		if (!endjudge)
+		{
+			break;
+		}
+	}
+
+}
+
+
